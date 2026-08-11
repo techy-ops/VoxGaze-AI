@@ -8,3 +8,4 @@ venv/
 dist/
 build/
 *.keystore
+/frontend/android/app/debug.keystore
