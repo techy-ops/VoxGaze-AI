@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Any, Dict, List, Optional, Callable, Union
+from typing import Any, List, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from app.ai.inference.prediction import Prediction
@@ -11,28 +11,49 @@ from app.utils.logger import logger
 class InferenceEngine:
     """
     Asynchronous Inference Pipeline Engine for VoxGaze AI.
-    Handles input tensor routing, non-blocking model execution via thread pool,
-    accurate latency breakdown measurement (preprocess, inference, postprocess),
-    confidence extraction, and batch prediction support.
+
+    Handles:
+    - Input tensor routing
+    - Non-blocking model execution via thread pool
+    - Latency breakdown measurement
+    - Confidence extraction
+    - Batch prediction support
     """
 
-    def __init__(self, manager: ModelManager = model_manager, max_workers: int = 4):
+    def __init__(
+        self,
+        manager: ModelManager = model_manager,
+        max_workers: int = 4,
+    ):
         self.manager = manager
-        self.thread_pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="AIInferenceWorker")
+        self.thread_pool = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="AIInferenceWorker",
+        )
 
     def _extract_confidence(self, raw_prediction: Any) -> float:
         """
         Extract numeric confidence score from model prediction output.
         """
         if isinstance(raw_prediction, dict):
-            if "confidence" in raw_prediction and isinstance(raw_prediction["confidence"], (int, float)):
+            if (
+                "confidence" in raw_prediction
+                and isinstance(raw_prediction["confidence"], (int, float))
+            ):
                 return float(raw_prediction["confidence"])
-            if "score" in raw_prediction and isinstance(raw_prediction["score"], (int, float)):
+
+            if (
+                "score" in raw_prediction
+                and isinstance(raw_prediction["score"], (int, float))
+            ):
                 return float(raw_prediction["score"])
+
         elif isinstance(raw_prediction, (float, int)):
             return float(raw_prediction)
+
         elif hasattr(raw_prediction, "confidence"):
             return float(getattr(raw_prediction, "confidence"))
+
         return 1.0
 
     async def infer(
@@ -47,18 +68,20 @@ class InferenceEngine:
     ) -> Prediction:
         """
         Execute asynchronous single-item inference pipeline.
-        
+
         Steps:
-        1. Run preprocess_fn if provided (measure preprocessing_time_ms)
-        2. Get/load model instance via ModelManager
-        3. Offload raw predict() call to thread pool (measure inference_time_ms)
-        4. Run postprocess_fn if provided (measure postprocessing_time_ms)
-        5. Return structured Prediction object
+        1. Run preprocess_fn if provided and measure preprocessing time.
+        2. Get/load model instance via ModelManager.
+        3. Offload raw predict() call to thread pool.
+        4. Measure inference execution time.
+        5. Run postprocess_fn if provided.
+        6. Return a structured Prediction object.
         """
         pipeline_start = time.perf_counter()
 
         # 1. Preprocessing
         pre_start = time.perf_counter()
+
         if preprocess_fn:
             if asyncio.iscoroutinefunction(preprocess_fn):
                 processed_input = await preprocess_fn(input_data)
@@ -66,27 +89,44 @@ class InferenceEngine:
                 processed_input = preprocess_fn(input_data)
         else:
             processed_input = input_data
+
         preprocess_time_ms = (time.perf_counter() - pre_start) * 1000.0
 
         # 2. Model Retrieval (Lazy loading)
-        model = await self.manager.get_or_load_model_async(name=model_name, version=version, device=device)
+        model = await self.manager.get_or_load_model_async(
+            name=model_name,
+            version=version,
+            device=device,
+        )
 
         # 3. Inference offloaded to ThreadPoolExecutor
         inf_start = time.perf_counter()
         loop = asyncio.get_running_loop()
+
         try:
             raw_output = await loop.run_in_executor(
                 self.thread_pool,
                 lambda: model.predict(processed_input, **kwargs),
             )
-            inference_time_ms = (time.perf_counter() - inf_start) * 1000.0
+
+            inference_time_ms = (
+                time.perf_counter() - inf_start
+            ) * 1000.0
+
         except Exception as exc:
-            inference_time_ms = (time.perf_counter() - inf_start) * 1000.0
-            logger.error(f"Inference execution failed on model '{model_name}': {str(exc)}")
+            inference_time_ms = (
+                time.perf_counter() - inf_start
+            ) * 1000.0
+
+            logger.error(
+                f"Inference execution failed on model "
+                f"'{model_name}': {str(exc)}"
+            )
             raise
 
         # 4. Postprocessing
         post_start = time.perf_counter()
+
         if postprocess_fn:
             if asyncio.iscoroutinefunction(postprocess_fn):
                 final_output = await postprocess_fn(raw_output)
@@ -94,10 +134,16 @@ class InferenceEngine:
                 final_output = postprocess_fn(raw_output)
         else:
             final_output = raw_output
-        postprocess_time_ms = (time.perf_counter() - post_start) * 1000.0
+
+        postprocess_time_ms = (
+            time.perf_counter() - post_start
+        ) * 1000.0
 
         # 5. Total metrics computation & payload construction
-        total_time_ms = (time.perf_counter() - pipeline_start) * 1000.0
+        total_time_ms = (
+            time.perf_counter() - pipeline_start
+        ) * 1000.0
+
         confidence = self._extract_confidence(final_output)
 
         prediction_obj = Prediction(
@@ -117,8 +163,10 @@ class InferenceEngine:
 
         logger.debug(
             f"Prediction completed for '{model_name}:{model.version}' "
-            f"[Total: {prediction_obj.processing_time_ms}ms, Inf: {prediction_obj.inference_time_ms}ms]"
+            f"[Total: {prediction_obj.processing_time_ms}ms, "
+            f"Inf: {prediction_obj.inference_time_ms}ms]"
         )
+
         return prediction_obj
 
     async def infer_batch(
@@ -133,7 +181,15 @@ class InferenceEngine:
     ) -> List[Prediction]:
         """
         Execute concurrent batch inference for a list of inputs.
+
+        Raises:
+            ValueError: If batch_inputs is empty.
         """
+        if not batch_inputs:
+            raise ValueError(
+                "batch_inputs must contain at least one input."
+            )
+
         tasks = [
             self.infer(
                 model_name=model_name,
@@ -146,6 +202,7 @@ class InferenceEngine:
             )
             for item in batch_inputs
         ]
+
         return await asyncio.gather(*tasks)
 
     def shutdown(self) -> None:

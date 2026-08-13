@@ -1,4 +1,6 @@
 import anyio
+import pytest
+
 from app.ai.inference.base_model import MockAIModel
 from app.ai.inference.model_registry import ModelRegistry
 from app.ai.inference.model_manager import ModelManager
@@ -11,7 +13,12 @@ def test_inference_pipeline_execution():
     async def run():
         registry = ModelRegistry()
         registry.register(
-            model_cls_or_factory=lambda name, version, **kwargs: MockAIModel(name=name, version=version, dummy_confidence=0.94, **kwargs),
+            model_cls_or_factory=lambda name, version, **kwargs: MockAIModel(
+                name=name,
+                version=version,
+                dummy_confidence=0.94,
+                **kwargs,
+            ),
             name="pipeline_test_model",
             version="1.0.0",
         )
@@ -48,7 +55,11 @@ def test_batch_inference_execution():
     async def run():
         registry = ModelRegistry()
         registry.register(
-            model_cls_or_factory=lambda name, version, **kwargs: MockAIModel(name=name, version=version, **kwargs),
+            model_cls_or_factory=lambda name, version, **kwargs: MockAIModel(
+                name=name,
+                version=version,
+                **kwargs,
+            ),
             name="batch_test_model",
             version="1.0.0",
         )
@@ -62,9 +73,39 @@ def test_batch_inference_execution():
         )
 
         assert len(predictions) == 3
+
         for pred in predictions:
             assert isinstance(pred, Prediction)
             assert pred.model_name == "batch_test_model"
+
+    anyio.run(run)
+
+
+def test_batch_inference_rejects_empty_input():
+    async def run():
+        registry = ModelRegistry()
+        registry.register(
+            model_cls_or_factory=lambda name, version, **kwargs: MockAIModel(
+                name=name,
+                version=version,
+                **kwargs,
+            ),
+            name="empty_batch_test_model",
+            version="1.0.0",
+        )
+        manager = ModelManager(registry=registry)
+        engine = InferenceEngine(manager=manager)
+
+        with pytest.raises(
+            ValueError,
+            match="batch_inputs must contain at least one input\\.",
+        ):
+            await engine.infer_batch(
+                model_name="empty_batch_test_model",
+                batch_inputs=[],
+            )
+
+        engine.shutdown()
 
     anyio.run(run)
 
@@ -73,7 +114,12 @@ def test_model_benchmark_utility():
     async def run():
         registry = ModelRegistry()
         registry.register(
-            model_cls_or_factory=lambda name, version, **kwargs: MockAIModel(name=name, version=version, dummy_latency_ms=1.0, **kwargs),
+            model_cls_or_factory=lambda name, version, **kwargs: MockAIModel(
+                name=name,
+                version=version,
+                dummy_latency_ms=1.0,
+                **kwargs,
+            ),
             name="benchmark_test_model",
             version="1.0.0",
         )
